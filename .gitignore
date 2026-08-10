@@ -1,0 +1,231 @@
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+
+# ============================================
+# Virtual Environment
+# ============================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================
+# Jupyter Notebooks
+# ============================================
+.ipynb_checkpoints/
+*.ipynb
+*.ipynb_checkpoints/
+
+# ============================================
+# Environment Variables
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# ============================================
+# Data Files
+# ============================================
+data/
+*.csv
+*.json
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.log
+
+# ============================================
+# Secrets / Keys
+# ============================================
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+*.jks
+*.truststore
+*.keystore
+secrets/
+credentials/
+
+# ============================================
+# IDE / Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+.project
+.classpath
+.settings/
+*.code-workspace
+
+# ============================================
+# Docker
+# ============================================
+*.pid
+*.tmp
+.dockerignore
+docker-compose.override.yml
+docker-compose.*.yml
+
+# ============================================
+# Airflow
+# ============================================
+airflow/logs/
+airflow/plugins/
+airflow/__pycache__/
+airflow/dags/__pycache__/
+airflow/dags/*.pyc
+airflow/dags/*.pyo
+airflow/airflow.db
+airflow/airflow.cfg
+airflow/webserver_config.py
+airflow/unittests.cfg
+
+# ============================================
+# Spark
+# ============================================
+spark/work/
+spark/logs/
+spark/metastore_db/
+spark/derby.log
+spark/*.log
+
+# ============================================
+# dbt
+# ============================================
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/*.db
+dbt/schema.yml
+dbt/*.log
+
+# ============================================
+# Great Expectations
+# ============================================
+great_expectations/uncommitted/
+great_expectations/checkpoints/
+great_expectations/validations/
+great_expectations/*.db
+great_expectations/ge_db.db
+
+# ============================================
+# Monitoring
+# ============================================
+monitoring/grafana/data/
+monitoring/prometheus/data/
+monitoring/*.db
+
+# ============================================
+# OS
+# ============================================
+Thumbs.db
+Desktop.ini
+*.bak
+*.tmp
+*.temp
+
+# ============================================
+# Terraform
+# ============================================
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+terraform.tfvars.json
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ============================================
+# Testing
+# ============================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+*.py,cover
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# ============================================
+# Misc
+# ============================================
+*.gz
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ============================================
+# Local Development
+# ============================================
+.local/
+.venv/
+.idea/
+.vscode/
+.DS_Store
+
+# ============================================
+# Bank360 specific
+# ============================================
+data/bronze/
+data/silver/
+data/gold/
+data/csv/*.csv
+data/json/*.json
+
+# Scripts Python compilés
+scripts/__pycache__/
+scripts/*.pyc

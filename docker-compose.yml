@@ -1,0 +1,487 @@
+version: "3.8"
+
+# ============================================
+# VARIABLES GLOBALES (réutilisables)
+# ============================================
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+    - AIRFLOW__WEBSERVER__SECRET_KEY=${WEBSERVER_SECRET_KEY}
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+    - AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL=10
+    - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=30
+    - AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT=False
+    - AIRFLOW__LOGGING__LOGGING_LEVEL=INFO
+    # Connexions Airflow
+    - AIRFLOW_CONN_POSTGRES=postgresql://bank360:bank360@postgres:5432/bank360
+    - AIRFLOW_CONN_KAFKA=kafka://kafka:9092
+    - AIRFLOW_CONN_MINIO=minio://minioadmin:minioadmin@minio:9000
+    - AIRFLOW_CONN_SPARK=spark://spark-master:7077
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./scripts:/opt/airflow/scripts
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+    spark-master:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  networks:
+    - bank360-network
+  restart: on-failure
+
+# ============================================
+# SERVICES
+# ============================================
+services:
+
+  # ---------- POSTGRESQL (Source de données principale) ----------
+  postgres:
+    image: postgres:15-alpine
+    container_name: bank360_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bank360
+      POSTGRES_PASSWORD: bank360
+      POSTGRES_DB: bank360
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init/init_postgres.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./data-generator/generate_postgres_data.py:/docker-entrypoint-initdb.d/02_generate_data.py
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bank360 -d bank360"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- POSTGRESQL AIRFLOW (Métadonnées Airflow) ----------
+  postgres-airflow:
+    image: postgres:15-alpine
+    container_name: bank360_postgres_airflow
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- KAFKA (Streaming) ----------
+    # ---------- KAFKA (Streaming) ----------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: bank360_zookeeper
+    restart: unless-stopped
+
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+    ports:
+      - "2181:2181"
+
+    networks:
+      - bank360-network
+
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: bank360_kafka
+    restart: unless-stopped
+
+    depends_on:
+      - zookeeper
+
+    ports:
+      - "9092:9092"
+
+    environment:
+      KAFKA_BROKER_ID: 1
+
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+    networks:
+      - bank360-network
+
+
+  # ---------- KAFKA UI (Interface de gestion) ----------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: bank360_kafka_ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      KAFKA_CLUSTERS_0_JMXPORT: 9091
+      KAFKA_CLUSTERS_0_JMXHOST: kafka
+      KAFKA_CLUSTERS_0_READONLY: "false"
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- MINIO (Stockage objet pour Iceberg) ----------
+  minio:
+    image: minio/minio:latest
+    container_name: bank360_minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DEFAULT_BUCKETS: bronze,silver,gold
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- SPARK MASTER ----------
+  spark-master:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: bank360_spark_master
+    restart: unless-stopped
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8081
+      - SPARK_MASTER_OPTS=-Dspark.master.rest.enabled=true
+      - SPARK_DEFAULT_PARALLELISM=4
+      - SPARK_SQL_SHUFFLE_PARTITIONS=4
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_REGION=us-east-1
+    ports:
+      - "8081:8081"
+      - "7077:7077"
+      - "6066:6066"
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+      - ./spark/config:/opt/spark/conf/custom
+      - ./scripts:/opt/spark/scripts
+      - ./data:/opt/spark/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- SPARK WORKER ----------
+  spark-worker:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: bank360_spark_worker
+    restart: unless-stopped
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_REGION=us-east-1
+    ports:
+      - "8082:8081"
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+      - ./spark/config:/opt/spark/conf/custom
+      - ./data:/opt/spark/data
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - bank360-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- AIRFLOW INIT (Initialisation base de données) ----------
+  airflow-init:
+    <<: *airflow-common
+    container_name: bank360_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@bank360.com
+        airflow connections add 'postgres_default' \
+          --conn-type 'postgres' \
+          --conn-login 'bank360' \
+          --conn-password 'bank360' \
+          --conn-host 'postgres' \
+          --conn-port '5432' \
+          --conn-schema 'bank360'
+        airflow connections add 'spark_default' \
+          --conn-type 'spark' \
+          --conn-host 'spark-master' \
+          --conn-port '7077'
+        airflow connections add 'kafka_default' \
+          --conn-type 'kafka' \
+          --conn-host 'kafka' \
+          --conn-port '9092'
+        airflow connections add 'minio_default' \
+          --conn-type 'minio' \
+          --conn-extra '{"endpoint_url": "http://minio:9000", "aws_access_key_id": "minioadmin", "aws_secret_access_key": "minioadmin"}'
+        echo " Airflow initialisé avec succès"
+    restart: "no"
+    networks:
+      - bank360-network
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+
+  # ---------- AIRFLOW WEBSERVER ----------
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: bank360_airflow_webserver
+    command: webserver
+    ports:
+      - "8083:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ---------- AIRFLOW SCHEDULER ----------
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: bank360_airflow_scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_healthy
+    restart: always
+
+  # ---------- DBT (Transformation) ----------
+  dbt:
+    build:
+      context: ./dbt
+      dockerfile: Dockerfile
+    container_name: bank360_dbt
+    restart: unless-stopped
+    environment:
+      - DBT_PROFILES_DIR=/usr/app/dbt
+      - DBT_TARGET=dev
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=bank360
+      - POSTGRES_PASSWORD=bank360
+      - POSTGRES_DB=bank360
+      - POSTGRES_PORT=5432
+    volumes:
+      - ./dbt:/usr/app/dbt
+      - ./data:/usr/app/data
+    working_dir: /usr/app/dbt
+    networks:
+      - bank360-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- GREAT EXPECTATIONS (Qualité des données) ----------
+  great-expectations:
+    build:
+      context: ./great_expectations
+      dockerfile: Dockerfile
+    container_name: bank360_great_expectations
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=bank360
+      - POSTGRES_PASSWORD=bank360
+      - POSTGRES_DB=bank360
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    volumes:
+      - ./great_expectations:/app/great_expectations
+      - ./data:/app/data
+    working_dir: /app/great_expectations
+    networks:
+      - bank360-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ---------- STREAMLIT (Dashboard temps réel) ----------
+  streamlit:
+    build:
+      context: ./dashboards/streamlit
+      dockerfile: Dockerfile
+    container_name: bank360_streamlit
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=bank360
+      - POSTGRES_USER=bank360
+      - POSTGRES_PASSWORD=bank360
+      - POSTGRES_PORT=5432
+      - KAFKA_BROKER=kafka:9092
+      - MINIO_ENDPOINT=http://minio:9000
+    volumes:
+      - ./dashboards/streamlit:/app
+    networks:
+      - bank360-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================
+# VOLUMES PERSISTANTS
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  postgres_airflow_data:
+    driver: local
+  kafka_data:
+    driver: local
+  minio_data:
+    driver: local
+
+# ============================================
+# RÉSEAU DÉDIÉ
+# ============================================
+networks:
+  bank360-network:
+    name: bank360_network
+    driver: bridge
