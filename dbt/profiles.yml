@@ -1,0 +1,12 @@
+bank360:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: postgres
+      user: bank360
+      password: bank360
+      port: 5432
+      dbname: bank360
+      schema: gold
+      threads: 4

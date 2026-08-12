@@ -1,0 +1,57 @@
+config_version: 3.0
+
+datasources:
+  postgres:
+    class_name: Datasource
+    execution_engine:
+      class_name: SqlAlchemyExecutionEngine
+      connection_string: postgresql://bank360:bank360@postgres:5432/bank360
+    data_connectors:
+      default:
+        class_name: ConfiguredAssetSqlDataConnector
+        assets:
+          clients:
+            class_name: Asset
+            schema_name: bank360
+            table_name: clients
+          comptes:
+            class_name: Asset
+            schema_name: bank360
+            table_name: comptes
+          transactions:
+            class_name: Asset
+            schema_name: bank360
+            table_name: transactions
+
+stores:
+  expectations_store:
+    class_name: ExpectationsStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      base_directory: expectations/
+
+  validations_store:
+    class_name: ValidationsStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      base_directory: validations/
+
+  checkpoint_store:
+    class_name: CheckpointStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      base_directory: checkpoints/
+
+expectations_store_name: expectations_store
+validations_store_name: validations_store
+checkpoint_store_name: checkpoint_store
+
+data_docs_sites:
+  local_site:
+    class_name: SiteBuilder
+    show_how_to_buttons: true
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      base_directory: data_docs/
+    site_index_builder:
+      class_name: DefaultSiteIndexBuilder
