@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: silver
+    description: "Tables Silver Iceberg produites par Spark"
+    schema: silver
+
+    tables:
+      - name: clients
+      - name: comptes
+      - name: cartes
+      - name: transactions
+      - name: credits
+      - name: virements
+      - name: paiements
+      - name: operations_atm
+      - name: mobile_banking
+      - name: beneficiaires
+      - name: alertes_fraude

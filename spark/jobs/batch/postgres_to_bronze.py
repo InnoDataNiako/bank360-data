@@ -17,17 +17,21 @@ POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'bank360')
 
 # Liste des tables à ingérer
 TABLES = [
+    'agences',
+    'alertes_fraude',
+    'beneficiaires',
+    'cartes',
     'clients',
     'comptes',
-    'cartes',
-    'transactions',
     'credits',
-    'virements',
-    'paiements',
-    'operations_atm',
+    'devises',
+    'employes',
     'mobile_banking',
-    'beneficiaires',
-    'alertes_fraude'
+    'operations_atm',
+    'paiements',
+    'taux_change',
+    'transactions',
+    'virements'
 ]
 
 # URL de connexion PostgreSQL
@@ -44,52 +48,43 @@ def main():
     """Fonction principale d'ingestion"""
     
     print("=" * 60)
-    print(" Bank360 - Ingestion PostgreSQL vers Bronze")
+    print("🚀 Bank360 - Ingestion PostgreSQL vers Bronze")
     print("=" * 60)
     
     # Initialisation de Spark avec Iceberg
-    spark = SparkSession.builder \
-        .appName("PostgresToBronze") \
+    spark = (
+        SparkSession.builder
+        .appName("PostgresToBronze")
+
         .config(
             "spark.sql.extensions",
             "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-        ) \
+        )
+
         .config(
             "spark.sql.catalog.iceberg_catalog",
             "org.apache.iceberg.spark.SparkCatalog"
-        ) \
+        )
+
         .config(
             "spark.sql.catalog.iceberg_catalog.type",
-            "hadoop"
-        ) \
+            "rest"
+        )
+
+        .config(
+            "spark.sql.catalog.iceberg_catalog.uri",
+            "http://nessie:19120/iceberg"
+        )
+
         .config(
             "spark.sql.catalog.iceberg_catalog.warehouse",
-            "s3a://bronze/"
-        ) \
-        .config(
-            "spark.sql.catalog.iceberg_catalog.hadoop.fs.s3a.endpoint",
-            "http://minio:9000"
-        ) \
-        .config(
-            "spark.sql.catalog.iceberg_catalog.hadoop.fs.s3a.access.key",
-            os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-        ) \
-        .config(
-            "spark.sql.catalog.iceberg_catalog.hadoop.fs.s3a.secret.key",
-            os.getenv("MINIO_SECRET_KEY", "minioadmin")
-        ) \
-        .config(
-            "spark.sql.catalog.iceberg_catalog.hadoop.fs.s3a.path.style.access",
-            "true"
-        ) \
-        .config(
-            "spark.sql.catalog.iceberg_catalog.hadoop.fs.s3a.connection.ssl.enabled",
-            "false"
-        ) \
+            "warehouse"
+        )
+
         .getOrCreate()
-        
+    )
     print(f" Spark initialisé avec Iceberg")
-    print(f" Destination: MinIO / Bronze")
+    print(f" Destination: MinIO / warehouse / Bronze")
     print(f" Tables à ingérer: {len(TABLES)}")
     
     for table_name in TABLES:
@@ -114,7 +109,7 @@ def main():
             print(f"    {count} lignes lues depuis PostgreSQL")
             
             # Écrire en Bronze (Iceberg)
-            df.writeTo(f"iceberg_catalog.{table_name}").createOrReplace()
+            df.writeTo(f"iceberg_catalog.bronze.{table_name}").createOrReplace()
             
             print(f"    Table {table_name} ingérée en Bronze")
             

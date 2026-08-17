@@ -1,8 +1,8 @@
-name: 'bank360'
-version: '1.0.0'
+name: bank360
+version: 1.0.0
 config-version: 2
 
-profile: 'bank360'
+profile: bank360
 
 model-paths: ["models"]
 test-paths: ["tests"]
@@ -10,9 +10,18 @@ macro-paths: ["macros"]
 seed-paths: ["seeds"]
 
 target-path: "target"
+
 clean-targets:
   - "target"
   - "dbt_packages"
 
 vars:
-  schema: gold
+  bronze_schema: bronze
+  silver_schema: silver
+  gold_schema: gold
+
+models:
+  bank360:
+    gold:
+      +materialized: table
+      +schema: gold

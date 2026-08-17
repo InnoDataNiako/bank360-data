@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: dim_clients
+    description: Dimension des clients
+    columns:
+      - name: client_id
+        description: Identifiant unique du client
+        tests:
+          - unique
+          - not_null
+      - name: email
+        description: Email du client
+        tests:
+          - unique
+
+  - name: dim_comptes
+    description: Dimension des comptes
+    columns:
+      - name: compte_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fact_transactions
+    description: Faits des transactions bancaires
+    columns:
+      - name: transaction_id
+        tests:
+          - unique
+          - not_null
+      - name: montant
+        tests:
+          - not_null
+
+  - name: kpi_revenus_mensuels
+    description: Revenus mensuels agrégés
