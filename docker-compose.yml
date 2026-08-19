@@ -265,6 +265,8 @@ services:
       - ./spark/config:/opt/spark/conf/custom
       - ./scripts:/opt/spark/scripts
       - ./data:/opt/spark/data
+      - ./spark/jars:/opt/spark/jars/custom   # nouveau
+
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081"]
@@ -311,6 +313,7 @@ services:
       - ./spark/jobs:/opt/spark/jobs
       - ./spark/config:/opt/spark/conf/custom
       - ./data:/opt/spark/data
+      - ./spark/jars:/opt/spark/jars/custom   # nouveau
 
     depends_on:
       spark-master:
@@ -366,6 +369,7 @@ services:
       - ./spark/jobs:/opt/spark/jobs
       - ./spark/config:/opt/spark/conf/custom
       - ./data:/opt/spark/data
+      - ./spark/jars:/opt/spark/jars/custom   # nouveau
 
     depends_on:
       spark-master:
@@ -548,11 +552,9 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_DB=bank360
-      - POSTGRES_USER=bank360
-      - POSTGRES_PASSWORD=bank360
-      - POSTGRES_PORT=5432
+      - SPARK_THRIFT_HOST=spark-thrift
+      - SPARK_THRIFT_PORT=10000
+      - SPARK_THRIFT_DATABASE=default_gold
       - KAFKA_BROKER=kafka:9092
       - MINIO_ENDPOINT=http://minio:9000
     volumes:
@@ -560,10 +562,8 @@ services:
     networks:
       - bank360-network
     depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
+      spark-thrift:
+        condition: service_started
     logging:
       driver: "json-file"
       options:

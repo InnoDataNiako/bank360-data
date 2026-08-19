@@ -5,3 +5,5 @@ sqlalchemy==2.0.19
 psycopg2-binary==2.9.7
 kafka-python==2.0.2
 minio==7.2.0
+pyhive==0.6.5
+thrift==0.16.0

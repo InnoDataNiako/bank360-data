@@ -24,4 +24,4 @@ models:
   bank360:
     gold:
       +materialized: table
-      +schema: gold
+      +file_format: iceberg
