@@ -36,7 +36,8 @@ HTTP_TIMEOUT_SECONDS = 10
 # Jars nécessaires aux jobs Spark (cf. ingestion/README.md)
 SPARK_JARS = (
     "/opt/spark/jars/postgresql-42.6.0.jar,"
-    "/opt/spark/jars/iceberg-aws-bundle-1.5.2.jar"
+    "/opt/spark/jars/iceberg-aws-bundle-1.5.2.jar,"
+    "/opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar"
 )
 
 

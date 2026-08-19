@@ -21,19 +21,23 @@ ingestion Bronze, transformation Silver, modélisation Gold.
 
 ```text
 healthcheck_environment
-    ↓ (Postgres / MinIO / Nessie / Spark Thrift OK)
-ingestion_postgres_to_bronze (spark-submit)
-    ↓
-transformation_bronze_to_silver (spark-submit)
-    ↓
-modeling_silver_to_gold (dbt run)
+    | (Postgres / MinIO / Nessie / Spark Thrift OK)
+ingestion_postgres_to_bronze (SparkSubmitOperator)
+    |
+transformation_bronze_to_silver (SparkSubmitOperator)
+    |
+modeling_silver_to_gold (BashOperator -> docker exec bank360_dbt dbt run)
 ```
 
-Le DAG ne lance pas de nouveaux conteneurs : il exécute des `docker exec`
-sur les conteneurs longue durée déjà en place (`bank360_spark_master`,
-`bank360_dbt`), via le socket Docker monté dans le conteneur Airflow
-(`/var/run/docker.sock`). Ce sont exactement les commandes validées
-manuellement dans `ingestion/README.md`, rejouées automatiquement.
+Les deux tâches Spark (`ingestion_postgres_to_bronze`,
+`transformation_bronze_to_silver`) utilisent `SparkSubmitOperator` avec la
+connexion Airflow `spark_default` (`spark://spark-master:7077`) : un vrai
+`spark-submit` réseau depuis le conteneur Airflow vers le cluster Spark,
+pas un `docker exec`.
+
+Seule la dernière tâche, `modeling_silver_to_gold`, exécute un `docker exec
+bank360_dbt dbt run` sur le conteneur `bank360_dbt` déjà en place, via le
+socket Docker monté dans le conteneur Airflow (`/var/run/docker.sock`).
 
 ## Exécution
 
@@ -52,8 +56,20 @@ docker exec -it bank360_airflow_scheduler airflow dags trigger bank360_pipeline
   airflow-scheduler`) - à vérifier, ils ne le sont pas forcément par
   défaut au premier `docker compose up`.
 - Le client Docker CLI doit être installé dans l'image Airflow (ajouté au
-  `Dockerfile`), sans quoi les tâches `docker exec` échouent avec
-  `docker: command not found`. Le socket seul ne suffit pas.
+  `Dockerfile`), sans quoi la tâche `modeling_silver_to_gold` (seule tâche
+  faisant du `docker exec`) échoue avec `docker: command not found`. Le
+  socket seul ne suffit pas.
+- **Le jar runtime Iceberg-Spark doit être présent dans `spark/jars/`** :
+  `iceberg-spark-runtime-3.5_2.12-1.5.2.jar` (version alignée sur
+  `iceberg-aws-bundle-1.5.2.jar`, déjà présent). Ce jar fournit la classe
+  `org.apache.iceberg.spark.SparkCatalog` référencée dans
+  `SPARK_JARS` du DAG. `iceberg-aws-bundle` seul ne suffit pas : il ne
+  couvre que l'intégration S3, pas le catalogue Iceberg lui-même. Sans ce
+  jar, `transformation_bronze_to_silver` plante immédiatement avec
+  `ClassNotFoundException: org.apache.iceberg.spark.SparkCatalog`, avant
+  de traiter la moindre table. Comme `spark/jars/` est monté en bind mount
+  (`./spark/jars:/opt/spark/jars`), il suffit de placer le fichier dans ce
+  dossier local pour qu'il soit visible dans tous les conteneurs.
 - Les namespaces Iceberg `bronze` et `silver` doivent déjà exister (voir
   `ingestion/README.md`, sections 1 et 2) avant le premier run du DAG.
 
@@ -70,13 +86,80 @@ docker exec -it bank360_airflow_scheduler airflow dags trigger bank360_pipeline
   champ `activeapps`) - un simple test "le port 10000 répond" ne suffit
   pas, puisque c'est justement le cas de panne observé où le port reste
   ouvert alors que l'app n'est plus reconnue.
-- **Permissions sur `/var/run/docker.sock`** : selon la configuration de
-  l'hôte, l'utilisateur `airflow` du conteneur peut ne pas avoir les
-  droits sur le socket monté (appartenant au groupe `docker` de l'hôte).
-  Si les tâches `docker exec` échouent avec `permission denied`, il faut
-  aligner le GID du groupe `docker` dans l'image Airflow sur celui de
-  l'hôte, ou exécuter ces tâches spécifiques en root.
+
+- **Permissions sur `/var/run/docker.sock`.** L'utilisateur `airflow` du
+  conteneur (uid 50000, groupe `root`) n'a par défaut pas les droits sur
+  le socket monté, qui appartient au groupe Docker de l'hôte (GID variable
+  selon la machine, ex. `984`). Symptôme : la tâche `modeling_silver_to_gold`
+  échoue avec `permission denied while trying to connect to the docker API
+  at unix:///var/run/docker.sock`.
+
+  Fix validé : ajouter le GID du groupe `docker` de l'hôte dans
+  `group_add` de `x-airflow-common` (docker-compose.yml) :
+
+  ```yaml
+  x-airflow-common: &airflow-common
+    # ...
+    group_add:
+      - "984"   # getent group docker sur l'hôte pour obtenir le vrai GID
+  ```
+
+  Puis `docker compose up -d --force-recreate airflow-scheduler
+  airflow-webserver`. Le GID étant spécifique à chaque machine, préférer à
+  terme une variable d'environnement (`${DOCKER_GID}` dans `.env`) plutôt
+  qu'une valeur en dur, pour que le repo reste portable entre postes.
+
+- **`LOCATION_ALREADY_EXISTS` sur les tables Gold (`default_gold.db.*`).**
+  Si le run dbt (`modeling_silver_to_gold`) est interrompu en plein
+  `CREATE TABLE AS SELECT` (crash, kill, plantage réseau), le fichier
+  Parquet reste sur S3/MinIO à l'emplacement `s3a://warehouse/default_gold.db/<table>/`
+  mais l'entrée correspondante n'existe plus (ou plus jamais existé) dans
+  le metastore Hive de Spark. Au run suivant, dbt tente un nouveau `CREATE
+  TABLE` sur un emplacement déjà occupé et Spark refuse :
+
+  ```
+  [LOCATION_ALREADY_EXISTS] Cannot name the managed table as
+  spark_catalog.default_gold.<table>, as its associated location
+  's3a://warehouse/default_gold.db/<table>' already exists.
+  ```
+
+  Seules les tables `table` sont concernées (les `view`, comme les
+  modèles `stg_*`, n'ont pas de stockage physique et ne sont jamais
+  affectées).
+
+  Fix : purger le(s) dossier(s) orphelin(s) dans MinIO avant de relancer,
+  via un conteneur `mc` jetable sur le réseau du projet :
+
+  ```bash
+  docker run --rm --entrypoint sh \
+    --network bank360-data-platform_bank360-network \
+    minio/mc:latest -c "
+  mc alias set local http://minio:9000 minioadmin minioadmin &&
+  mc rm --recursive --force local/warehouse/default_gold.db/<table>/
+  "
+  ```
+
+  Pour repartir sur une base saine sans cibler table par table, vider tout
+  `default_gold.db/` d'un coup (dbt recrée l'intégralité du schéma à
+  chaque `dbt run` complet) :
+
+  ```bash
+  docker run --rm --entrypoint sh \
+    --network bank360-data-platform_bank360-network \
+    minio/mc:latest -c "
+  mc alias set local http://minio:9000 minioadmin minioadmin &&
+  mc rm --recursive --force local/warehouse/default_gold.db/
+  "
+  ```
+
+  Amélioration possible pour éviter ce nettoyage manuel de façon
+  définitive : migrer les modèles Gold vers des tables Iceberg (matériau
+  déjà utilisé pour Bronze/Silver) plutôt que des tables managées Hive
+  classiques - un `DROP TABLE IF EXISTS` sur une table Iceberg gère
+  proprement le cycle de vie catalogue + stockage, contrairement au
+  comportement observé ici.
+
 - **`modeling_silver_to_gold` n'est plus un `DummyOperator`.**
   L'intégration dbt a été validée de bout en bout (`dbt run` complet :
-  staging, dimensions, faits, KPIs) - c'est la troisième tâche réelle du
-  DAG dès le premier jet
+  staging, dimensions, faits, KPIs, `PASS=20 WARN=0 ERROR=0`) - c'est la
+  quatrième tâche réelle du DAG dès le premier jet.

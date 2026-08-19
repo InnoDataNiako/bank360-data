@@ -40,6 +40,9 @@ x-airflow-common: &airflow-common
     - ./spark/jobs:/opt/spark/jobs
     - ./spark/jars:/opt/spark/jars
 
+  group_add:
+    - "984"
+
   depends_on:
     postgres-airflow:
       condition: service_healthy
@@ -54,7 +57,6 @@ x-airflow-common: &airflow-common
     - bank360-network
 
   restart: on-failure
-
 # ============================================
 # SERVICES
 # ============================================
@@ -282,13 +284,12 @@ services:
       dockerfile: Dockerfile
     container_name: bank360_spark_worker
     restart: unless-stopped
-
     command: >
       /opt/spark/bin/spark-class
       org.apache.spark.deploy.worker.Worker
       spark://spark-master:7077
-      --cores 2
-      --memory 2G
+      --cores 4
+      --memory 4G
       --webui-port 8081
 
     environment:
@@ -337,6 +338,7 @@ services:
     command: >
       /opt/spark/sbin/start-thriftserver.sh
       --master spark://spark-master:7077
+      --conf spark.cores.max=2
       --conf spark.sql.warehouse.dir=s3a://warehouse/
       --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog
       --conf spark.sql.catalog.iceberg_catalog.type=rest
@@ -350,7 +352,7 @@ services:
       --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
       --hiveconf hive.server2.thrift.port=10000
       --hiveconf hive.server2.thrift.bind.host=0.0.0.0
-
+      
     ports:
       - "10000:10000"
 
