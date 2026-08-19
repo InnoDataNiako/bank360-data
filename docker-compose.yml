@@ -5,8 +5,10 @@ x-airflow-common: &airflow-common
   build:
     context: ./airflow
     dockerfile: Dockerfile
+
   env_file:
     - .env
+
   environment:
     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
@@ -19,17 +21,25 @@ x-airflow-common: &airflow-common
     - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=30
     - AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT=False
     - AIRFLOW__LOGGING__LOGGING_LEVEL=INFO
-    # Connexions Airflow
+
     - AIRFLOW_CONN_POSTGRES=postgresql://bank360:bank360@postgres:5432/bank360
     - AIRFLOW_CONN_KAFKA=kafka://kafka:9092
     - AIRFLOW_CONN_MINIO=minio://minioadmin:minioadmin@minio:9000
     - AIRFLOW_CONN_SPARK=spark://spark-master:7077
+
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./scripts:/opt/airflow/scripts
+
+    # Docker
     - /var/run/docker.sock:/var/run/docker.sock
+
+    # Spark
+    - ./spark/jobs:/opt/spark/jobs
+    - ./spark/jars:/opt/spark/jars
+
   depends_on:
     postgres-airflow:
       condition: service_healthy
@@ -39,8 +49,10 @@ x-airflow-common: &airflow-common
       condition: service_healthy
     kafka:
       condition: service_healthy
+
   networks:
     - bank360-network
+
   restart: on-failure
 
 # ============================================

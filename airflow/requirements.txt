@@ -4,6 +4,9 @@ apache-airflow-providers-apache-kafka==1.5.0
 apache-airflow-providers-postgres==5.7.1
 apache-airflow-providers-http==4.6.0
 
+# SPARK — même version que le cluster
+pyspark==3.5.1
+
 # UTILITAIRES
 requests==2.31.0
 python-dotenv==1.0.0
@@ -17,6 +20,6 @@ kafka-python==2.0.2
 # GENERATION DE DONNEES
 faker==20.1.0
 
-# FORMAT DATA (PARQUET / SPARK)
+# FORMAT DATA
 pyarrow==14.0.2
 pandas==2.1.2

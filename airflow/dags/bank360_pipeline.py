@@ -29,6 +29,7 @@ from airflow.exceptions import AirflowException
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
 HTTP_TIMEOUT_SECONDS = 10
 
@@ -112,7 +113,6 @@ def healthcheck_environment(**_context) -> None:
             f"pour éviter une cascade d'échecs :\n  - {details}"
         )
 
-
 default_args = {
     "owner": "data-eng",
     "depends_on_past": False,
@@ -125,7 +125,7 @@ with DAG(
     dag_id="bank360_pipeline",
     description="Pipeline bank360 : healthcheck -> Bronze -> Silver -> Gold (dbt)",
     default_args=default_args,
-    schedule_interval="0 2 * * *",  # tous les jours à 2h du matin
+    schedule_interval="0 2 * * *",
     start_date=datetime(2026, 8, 1),
     catchup=False,
     max_active_runs=1,
@@ -137,36 +137,29 @@ with DAG(
         python_callable=healthcheck_environment,
     )
 
-    ingestion_postgres_to_bronze = BashOperator(
+    #  Utilisation de SparkSubmitOperator au lieu de docker exec
+    ingestion_postgres_to_bronze = SparkSubmitOperator(
         task_id="ingestion_postgres_to_bronze",
-        bash_command=(
-            "docker exec bank360_spark_master spark-submit "
-            "--master local[*] "
-            f"--jars {SPARK_JARS} "
-            "/opt/spark/jobs/batch/postgres_to_bronze.py"
-        ),
-    )
+        application="/opt/spark/jobs/batch/postgres_to_bronze.py",
+        conn_id="spark_default",
+        jars=SPARK_JARS,
+        verbose=True,
+)
 
-    transformation_bronze_to_silver = BashOperator(
+    transformation_bronze_to_silver = SparkSubmitOperator(
         task_id="transformation_bronze_to_silver",
-        bash_command=(
-            "docker exec bank360_spark_master spark-submit "
-            "--master local[*] "
-            f"--jars {SPARK_JARS} "
-            "/opt/spark/jobs/batch/bronze_to_silver.py"
-        ),
-    )
+        application="/opt/spark/jobs/batch/bronze_to_silver.py",
+        conn_id="spark_default",
+        jars=SPARK_JARS,
+        verbose=True,
+)
 
-    # dbt run - tâche réelle, plus un DummyOperator : l'intégration dbt a
-    # été validée de bout en bout (staging + dimensions + faits + KPIs).
+
+    # dbt run
     modeling_silver_to_gold = BashOperator(
         task_id="modeling_silver_to_gold",
         bash_command="docker exec bank360_dbt dbt run",
+        dag=dag
     )
 
-    (
-        healthcheck
-        >> ingestion_postgres_to_bronze
-        >> transformation_bronze_to_silver
-        >> modeling_silver_to_gold
-    )
+    healthcheck >> ingestion_postgres_to_bronze >> transformation_bronze_to_silver >> modeling_silver_to_gold
